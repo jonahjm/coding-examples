@@ -1,0 +1,383 @@
+---
+title: "Problem Set 8"
+author: "Jonah Messinger"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Desktop/POLI 301/Problem Set 8")
+library(tidyverse)
+library(ggplot2)
+#These packages are for the mapmaking
+library(sf)
+library(tidycensus)
+library(tigris)
+library(spData)
+```
+
+# Section 1
+```{r, Section 1, fig.align='center'}
+statesmap <- read_sf("tl_2024_us_state.shp")
+countiesmap <- read_sf("tl_2024_us_county.shp")
+
+california <- statesmap %>% 
+  filter(NAME == "California")
+cali_county <- countiesmap %>% 
+  filter(STATEFP == "06")
+
+#Make a binary variable that is a 1 for Orange County and a 0 for all other counties
+cali_county <- cali_county %>% 
+  mutate(my_county = ifelse(NAME == "Orange", 1, 0))
+
+orange_county <- cali_county %>% 
+  filter(NAME == "Orange")
+
+ggplot() +
+  geom_sf(data = cali_county, aes(fill = as.factor(my_county)), color = "darkred", linewidth = 1) +
+  geom_sf(data = california, fill = NA, color = "green", linewidth = 2) +
+  scale_fill_manual(values = c("0" = "white", "1" = "darkblue")) +
+  labs(title = "My Home State — California",
+       subtitle = "My Home County — Orange County",
+       caption = "Source: U.S. Census Bureau") +
+  theme_minimal() +
+  coord_sf(crs = 4326) +
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+# Section 2
+```{r, Section 2, fig.width=10, fig.height=6, fig.align='center'}
+scandanavia <- get_acs(geography = "county", 
+                  variables = c("B04004_001E", 
+                                "B04004_033E",
+                                "B04004_059E",
+                                "B04004_089E"),
+                  year = 2022, 
+                  survey = "acs5",
+                  resolution = "20m")
+
+#scandanavia <- scandanavia %>%
+  #pivot_wider(names_from = variable, values_from = estimate) idk if I need this yet
+
+scand <- read_csv("ACSDT5Y2022.B04004-Data.csv")
+
+scand <- scand %>% 
+  mutate(pct_scand = (B04004_033E + B04004_059E + B04004_089E) / B04004_001E * 100)
+
+#Combine the scand dataframe with the countiesmap data frame using GEO_ID and GEOIDFQ using left_join
+scand_new <- countiesmap %>% 
+  left_join(scand, by = c("GEOIDFQ" = "GEO_ID"))
+
+#Remove Alaska Hawaii and Puerto Rico
+scand_new <- scand_new %>% 
+  filter(!STATEFP %in% c("02", "15")) %>% 
+  filter(!STATEFP > "56")
+
+
+ggplot(data = scand_new) +
+  geom_sf(aes(fill = pct_scand)) +
+  scale_fill_viridis_c(option = "magma", direction = -1) +
+  labs(title = "Scandinavian Population in the U.S.:\nClustering in North Dakota and Minnesota",
+       subtitle = "Percentage of Scandinavian Population by County",
+       caption = "Source: U.S. Census Bureau\nVariables Used: 
+       B04004_001E – total population reporting single ancestry
+       B04004_033E – population reporting Danish ancestry
+       B04004_059E – population reporting Norwegian ancestry
+       B04004_089E – population reporting Swedish ancestry",
+       fill = "Scandinavian Population (%)") +
+  theme_bw() +
+  coord_sf(crs = 5070) +
+  theme(legend.position = "bottom",
+        plot.caption = element_text(hjust = 0, size = 8),
+        plot.title = element_text(hjust = 0, size = 16, face = "bold"),
+        plot.subtitle = element_text(hjust = 0, size = 12),
+        panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+# Section 3
+```{r, Section 3, fig.width=10, fig.height=6, fig.align='center'}
+c_lvl_results <- read_csv("county_election_results_2020_w2024.csv")
+
+#Create new FIPS code for the countiesmap df, by combining the STATEFP and COUNTYFP columns
+countiesmap <- countiesmap %>% 
+  mutate(FIPS = paste0(STATEFP, COUNTYFP)) %>% 
+  mutate(FIPS = as.numeric(FIPS))
+
+#Remove Alaska, Hawaii, and Puerto Rico
+countiesmap <- countiesmap %>% 
+  filter(!STATEFP %in% c("02", "15")) %>% 
+  filter(!STATEFP > "56")
+
+#Add a 0 in fron of all 4 digit FIPS codes
+c_lvl_results <- c_lvl_results %>% 
+  mutate(FIPS = ifelse(nchar(FIPS) == 4, paste0("0", FIPS), FIPS)) %>% 
+  mutate(FIPS = as.numeric(FIPS))
+
+#Merge the c_lvl_results and countiesmap dataframes using the FIPS code
+merged_data <- merge(countiesmap, c_lvl_results, by = "FIPS")
+
+str(merged_data)
+
+#Make a new variable that is the two-party vote share won by Joe Biden
+merged_data <- merged_data %>% 
+  mutate(biden_share = (`Joseph R. Biden Jr.`/ (`Joseph R. Biden Jr.` + `Donald J. Trump`)) * 100) %>% 
+  mutate(biden_share = round(biden_share, 2))
+
+#Create a new binary variable to represent if Biden won the two-party vote share
+merged_data <- merged_data %>% 
+  mutate(biden_win = ifelse(biden_share > 50, 1, 0)) %>% 
+  mutate(biden_win = as.factor(biden_win))
+
+ggplot(data = merged_data) +
+  geom_sf(aes(fill = biden_win), color = "black", linewidth = 0.1) +
+  scale_fill_manual(values = c("0" = "red", "1" = "blue"),
+                    labels = c("0" = "Trump", "1" = "Biden")) +
+  labs(title = "Proof that 'Land Does Not Vote'",
+       subtitle = "Biden vs. Trump: 2020 Election Results",
+       caption = "Source: U.S. Census Bureau\nData from the 2020 Presidential Election; Alaska and PR data not available at the county level",
+       fill = "County Winner") +
+  theme_bw() +
+  coord_sf(crs = 5070) +
+  theme(legend.position = "bottom",
+        plot.caption = element_text(hjust = 0, size = 8),
+        plot.title = element_text(hjust = 0, size = 16, face = "bold"),
+        plot.subtitle = element_text(hjust = 0, size = 12),
+        panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+ggplot(data = merged_data) +
+  geom_sf(aes(fill = biden_share), color = "black", linewidth = 0.1) +
+  scale_fill_gradient2(low = "darkred", mid = "purple", high = "darkblue", midpoint = 50,
+                     labels = scales::percent_format(scale = 1)) +
+  labs(title = "Purple America",
+       subtitle = "Biden vs. Trump: 2020 Election Results",
+       caption = "Source: U.S. Census Bureau\nData from the 2020 Presidential Election; Alaska and PR data not available at the county level",
+       fill = "Vote Margin") +
+  theme_bw() +
+  coord_sf(crs = 5070) +
+  theme(legend.position = "bottom",
+        plot.caption = element_text(hjust = 0, size = 8),
+        plot.title = element_text(hjust = 0, size = 16, face = "bold"),
+        plot.subtitle = element_text(hjust = 0, size = 12),
+        panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+```
+
+# Section 4
+
+```{r, Section 4, fig.width=10, fig.height=6, fig.align='center'}
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+temples <- read_csv("ChurchofJesusChristTemples_w2024.csv")
+
+temples_sf <- st_as_sf(temples, coords = c("Longitude", "Latitude"), crs = 4326)
+
+
+ggplot() + 
+  geom_sf(data=world, fill = "#BFBC93", color = "black") +
+  geom_sf(data=temples_sf, color = "blue", fill = "lightblue", size = 2, shape = 24) +
+  labs(title = "LDS Temples Populate Every Continent of the World",
+       subtitle = "Locations of Church of Jesus Christ of Latter-Day Saints Temples Worldwide as of 2024",
+       caption = "Source: Church of Jesus Christ of Latter-Day Saints") +
+  coord_sf(crs = 4326) +
+  theme_bw() +
+  theme(plot.caption = element_text(hjust = 0, size = 10),
+        plot.title = element_text(hjust = 0, size = 25, face = "bold"),
+        plot.subtitle = element_text(hjust = 0, size = 18),
+        panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+# Section 5
+```{r, Section 5, fig.width=10, fig.height=6, fig.align='center'}
+library(shadowtext)
+
+
+statesmap_election <- statesmap %>% 
+  filter(!STATEFP %in% c("02", "15")) %>% 
+  filter(!STATEFP > "56")
+
+#Create shortened names for the states
+statesmap_election <- statesmap_election %>% 
+  mutate(state_shrt = case_when(
+    STATEFP == "01" ~ "Ala.",
+    STATEFP == "04" ~ "Ariz.",
+    STATEFP == "05" ~ "Ark.",
+    STATEFP == "06" ~ "Calif.",
+    STATEFP == "08" ~ "Colo.",
+    STATEFP == "09" ~ "Conn.",
+    STATEFP == "10" ~ "Del.",
+    STATEFP == "11" ~ "DC",
+    STATEFP == "12" ~ "Fla.",
+    STATEFP == "13" ~ "Ga.",
+    STATEFP == "16" ~ "Idaho",
+    STATEFP == "17" ~ "Ill.",
+    STATEFP == "18" ~ "Ind.",
+    STATEFP == "19" ~ "Iowa",
+    STATEFP == "20" ~ "Kan.",
+    STATEFP == "21" ~ "Ky.",
+    STATEFP == "22" ~ "La.",
+    STATEFP == "23" ~ "Maine",
+    STATEFP == "24" ~ "Md.",
+    STATEFP == "25" ~ "Mass.",
+    STATEFP == "26" ~ "Mich.",
+    STATEFP == "27" ~ "Minn.",
+    STATEFP == "28" ~ "Miss.",
+    STATEFP == "29" ~ "Mo.",
+    STATEFP == "30" ~ "Mont.",
+    STATEFP == "31" ~ "Neb.",
+    STATEFP == "32" ~ "Nev.",
+    STATEFP == "33" ~ "N.H.",
+    STATEFP == "34"  ~ "N.J.",
+    STATEFP == "35" ~ "N.M.",
+    STATEFP == "36" ~ "N.Y.",
+    STATEFP == "37" ~ "N.C.",
+    STATEFP == "38" ~ "N.D.",
+    STATEFP == "39" ~ "Ohio",
+    STATEFP == "40" ~ "Okla.",
+    STATEFP == "41" ~ "Ore.",
+    STATEFP == "42" ~ "Pa.",
+    STATEFP == "44" ~ "R.I.",
+    STATEFP == "45" ~ "S.C.",
+    STATEFP == "46" ~ "S.D.",
+    STATEFP == "47" ~ "Tenn.",
+    STATEFP == "48" ~ "Texas",
+    STATEFP == "49" ~ "Utah",
+    STATEFP == "50" ~ "Vt.",
+    STATEFP == "51" ~ "Va.",
+    STATEFP == "53" ~ "Wash.",
+    STATEFP == "54" ~ "W.Va.",
+    STATEFP == "55" ~ "Wis.",
+    STATEFP == "56" ~ "Wyo."))
+  
+
+results_2020 <- read_csv("2020_US_County_Level_Presidential_Results.csv")
+colnames(results_2020)[4:10] <- paste0(colnames(results_2020)[4:10], "_2020")
+
+results_2016 <- read_csv("2016_US_County_Level_Presidential_Results.csv")
+colnames(results_2016)[5:8] <- paste0(colnames(results_2016)[5:8], "_2016")
+
+#Rename results_2016 column with the name combined fips to county_fips and add a 0 in front of all 4 digit fips codes
+results_2016 <- results_2016 %>% 
+  mutate(combined_fips = ifelse(nchar(combined_fips) == 4, paste0("0", combined_fips), combined_fips)) %>% 
+  rename(county_fips = combined_fips)
+
+
+# Merge the two datasets
+election_results <- left_join(results_2016, results_2020, by = "county_fips")
+
+#Remove Alaska, Hawaii, and Puerto Rico
+election_results <- election_results %>% 
+  filter(!state_abbr %in% c("AK", "HI"))
+
+election_results <- election_results %>% 
+  mutate(county_fips = as.numeric(county_fips))
+
+election_results <- election_results %>%
+  mutate(shift_pct = (per_gop_2020 - per_dem_2020) - (per_gop_2016 - per_dem_2016)) %>%
+  filter(!is.na(shift_pct)) %>%
+  mutate(shift_vote = votes_gop_2020 - votes_gop)
+
+           
+#Select only a few variables
+election_results <- election_results %>% 
+  select(county_fips, state_abbr, county_name.x, 
+         per_dem_2016, per_dem_2020,
+         per_gop_2016, per_gop_2020,
+         votes_dem, votes_dem_2020,
+         votes_gop, votes_gop_2020,
+         shift_pct, shift_vote)
+
+election_results <- election_results %>%
+  mutate(shift_binary = ifelse(shift_pct > 0, 1, 0)) %>% 
+  mutate(shift_binary = as.factor(shift_binary))
+
+shift_map <- countiesmap %>%
+  left_join(election_results, by = c("FIPS" = "county_fips"))
+
+
+shift_map <- st_transform(shift_map, crs = 2163)
+
+shift_map <- shift_map %>%
+  mutate(centroid = st_centroid(geometry)) %>% 
+  mutate(
+    lng0 = st_coordinates(centroid)[, 1],
+    lat0 = st_coordinates(centroid)[, 2],
+    lng1 = lng0 + (shift_pct * 1000000),  
+    lat1 = lat0 + abs(shift_pct * 500000)
+  ) %>%
+  select(-centroid)
+
+statesmap_election <- st_transform(statesmap_election, crs = 2163)
+
+statesmap_election <- statesmap_election %>% 
+    mutate(centroid = st_centroid(geometry)) %>% 
+  mutate(
+    lng_txt = st_coordinates(centroid)[, 1],
+    lat_txt = st_coordinates(centroid)[, 2]
+  ) %>% 
+    select(-centroid)
+
+#Edit the Vermont coordinates
+statesmap_election_x <- statesmap_election %>% 
+  mutate(lng_txt = ifelse(STATEFP == "50", lng_txt - 10000, lng_txt)) %>% 
+  mutate(lat_txt = ifelse(STATEFP == "50", lat_txt + 150000, lat_txt)) %>% 
+  filter(state_shrt != "DC") %>% 
+  mutate(lng_txt = ifelse(STATEFP == "25", lng_txt + 150000, lng_txt)) %>% 
+  mutate(lat_txt = ifelse(STATEFP == "25", lat_txt + 20000, lat_txt)) %>% 
+  mutate(lng_txt = ifelse(STATEFP == "44", lng_txt + 50000, lng_txt)) %>% 
+  mutate(lat_txt = ifelse(STATEFP == "44", lat_txt - 100000, lat_txt)) %>% 
+  mutate(lng_txt = ifelse(STATEFP == "34", lng_txt + 125000, lng_txt)) %>% 
+  mutate(lat_txt = ifelse(STATEFP == "34", lat_txt - 30000, lat_txt)) %>% 
+  mutate(lng_txt = ifelse(STATEFP == "10", lng_txt + 125000, lng_txt)) %>% 
+  mutate(lat_txt = ifelse(STATEFP == "10", lat_txt - 30000, lat_txt)) %>% 
+  mutate(lng_txt = ifelse(STATEFP == "26", lng_txt + 100000, lng_txt)) %>% 
+  mutate(lat_txt = ifelse(STATEFP == "26", lat_txt - 30000, lat_txt)) %>% 
+  mutate(lng_txt = ifelse(STATEFP == "12", lng_txt + 100000, lng_txt)) 
+
+  
+
+
+
+
+
+ggplot() +
+  geom_sf(data = statesmap_election, color = "white", fill = "grey90", linewidth = 0.75) +
+  geom_segment(data = shift_map, aes(x = lng0, y = lat0, xend = lng1, yend = lat1, color = shift_binary),
+               arrow = arrow(length = unit(0.025, "inches"), type = "closed")) +
+  geom_shadowtext(data = statesmap_election_x, aes(x = lng_txt, y = lat_txt, label = state_shrt), 
+                  size = 3, bg.color = "white", bg.r = 0.3, color = "black") +
+  scale_color_manual(values = c("0" = "#64A1CA", "1" = "#D2595C"), na.translate = FALSE,
+                     labels = c("0" = "More Democratic", "1" = "More Republican"),
+                     guide = guide_legend(title.position = "bottom", 
+                                          title.hjust = 0.5, 
+                                          label.hjust = 0.5)) +
+  labs(title = "The 2020 Election: A Shift to the Left",
+       subtitle = "Change in Vote Share from 2016 to 2020",
+       caption = "Source: U.S. Census Bureau\nData from the 2016 and 2020 Presidential Elections; Alaska and PR data not available at the county level",
+       color = "Shift in Margin") +
+  coord_sf(crs = 2163) +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        legend.box = "horizontal",
+        legend.text.align = 0.5,
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.caption = element_text(hjust = 0, size = 8),
+        plot.title = element_text(hjust = 0, size = 20, face = "bold"),
+        plot.subtitle = element_text(hjust = 0, size = 16))
+```

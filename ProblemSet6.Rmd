@@ -1,0 +1,679 @@
+---
+title: "Problem Set 6"
+author: "Jonah Messinger"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyverse)
+library(sjPlot)
+library(lfe)
+library(broom)
+library(ggrepel)
+setwd("~/Desktop/POLI 301/Problem Set 6")
+```
+
+# Section 1: Stacked Area Chart
+```{r Stacked Area Chart, fig.width=10, fig.height=6, fig.align='center'}
+# Load the data
+refugee <- read_csv("refugee_status.csv")
+
+# Subset the data
+## Remove all individual countries and keep only the continents/regions
+refugee <- refugee %>%
+  filter(Country == "Africa" | Country == "Asia" | Country == "Europe" | Country == "South America" | Country == "North America")
+
+refugee <- refugee %>%
+  mutate(across(-Country, as.numeric))
+
+#Combine the Americas
+refugee <- refugee %>%
+  mutate(Country = ifelse(Country %in% c("North America", "South America"), "Americas", Country)) %>%
+  group_by(Country) %>%
+  summarise(across(everything(), sum, na.rm = TRUE))
+
+#Remove the "y" in front of every column not Country
+names(refugee) <- gsub("y", "", names(refugee))
+
+# Rename the first column to "Continent"
+names(refugee)[1] <- "Continent"
+
+#Pivot the data
+refugee_long <- refugee %>%
+  pivot_longer(cols = -Continent, names_to = "Year", values_to = "Value")
+
+#Make the year variable a date format
+refugee_long$Year <- as.numeric(refugee_long$Year)
+
+refugee_long <- refugee_long %>%
+  mutate(Continent = factor(Continent, levels = c("Africa", "Asia", "Europe", "Americas")))
+
+
+#Make a data frame for the y lines
+y_lines <- data.frame(y = seq(0, 8, 2),
+                      xmin = 2003,
+                      max = 2021)
+
+# Make a stacked area chart
+ggplot(refugee_long) +
+  geom_rect(aes(xmin = 2003, xmax = 2009, ymin = 0, ymax = 10), fill = "#f1f1f1", alpha = 0.2) +
+  geom_rect(aes(xmin = 2017, xmax = 2021, ymin = 0, ymax = 10), fill = "#f1f1f1", alpha = 0.2) +
+  geom_segment(data = y_lines, aes(x = xmin, xend = max, y = y, yend = y), color = "grey30", alpha = 0.5) +
+  geom_area(aes(x = Year, y = Value/10000, fill = Continent)) +
+  geom_label(data = refugee_long %>% filter(Year == 2004), aes(x = 2004, y = c(4, 0.5, 2.2, 1.2), label = Continent), nudge_x = 0.5, size = 5) +
+  scale_fill_manual(values = c("#F5C72F", "#F52F40", "#2F49F5", "#54A065")) +
+  scale_x_continuous(breaks = seq(2000, 2020, 4), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 10, 2), expand = c(0, 0.2)) +
+  labs(title = "The Number of Refugees Soared During the Obama Administration",
+       subtitle = "The grand majority of refugees come from Africa and Asia",
+       y = "Number of Refugees (in 10,000s)") +
+  annotate("text", x = 2003.5, y = 9, label = "George W. Bush (R)", size = 5, hjust = 0, vjust = 0) +
+  annotate("text", x = 2009.5, y = 9, label = "Barrack Obama (D)", size = 5, hjust = 0, vjust = 0) +
+  annotate("text", x = 2017.5, y = 9, label = "Donald Trump (R)", size = 5, hjust = 0, vjust = 0) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 10, face = "bold"),
+        legend.position = "none") +
+  theme(axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        plot.title = element_text(size = 20, face = "bold", hjust = 0),
+        plot.subtitle = element_text(size = 15, hjust = 0))
+
+```
+
+# Section 2: Politics and Covid Vaccine Uptake
+```{r Politics and Covid Vaccine Uptake, fig.width=10, fig.height=6, fig.align='center'}
+cer <- read_csv("county_election_results_2020.csv")
+
+# Question 1
+##Create a new variable to represent the vote share of Jose Biden in each county, given just between the two candidates (Democrats and Republicans)
+cer <- cer %>%
+  mutate(Biden_Pct = `Joseph R. Biden Jr.`/ (`Joseph R. Biden Jr.` + `Donald J. Trump`))
+##Report the mean, min and max of the vote share of Joe Biden
+cer %>%
+  summarize(mean = mean(Biden_Pct), min = min(Biden_Pct), max = max(Biden_Pct))
+
+## Select only a few columns
+cer_c <- cer %>%
+  select(FIPS, `Total Vote`, `Joseph R. Biden Jr.` , `Donald J. Trump`, Biden_Pct)
+
+# Question 2
+## Load the vaccine data
+vaccine <- read_csv("COVID-19_Vaccinations_in_the_United_States_County_20250312.csv")
+
+## Make date a true date format
+vaccine$Date <- as.Date(vaccine$Date, format = "%m/%d/%Y")
+
+## Select certain columns
+vaccine <- vaccine %>%
+  select(Date, FIPS, MMWR_week, Recip_County, Recip_State, Completeness_pct, Administered_Dose1_Recip, Administered_Dose1_Pop_Pct, Administered_Dose1_Recip_18Plus, Administered_Dose1_Recip_18PlusPop_Pct)
+
+#str(vaccine)
+
+## Make a subset that only takes data from 4/4/2021
+vaccine_4_4 <- vaccine %>%
+  filter(Date == "2021-04-04")
+
+## Report the min, mean and max of Administered_Dose1_Recip_18PlusPop_Pct in the data
+vaccine_4_4 %>%
+  filter(!is.na(Administered_Dose1_Recip_18PlusPop_Pct)) %>% 
+  summarize(min = min(Administered_Dose1_Recip_18PlusPop_Pct), mean = mean(Administered_Dose1_Recip_18PlusPop_Pct), max = max(Administered_Dose1_Recip_18PlusPop_Pct))
+
+
+## What is the max date in the data?
+max(vaccine$Date)
+
+## Make a subset that only takes data from 05/10/2023
+vaccine_latest <- vaccine %>%
+  filter(Date == "2023-05-10")
+
+## Report the min, mean and max of Administered_Dose1_Recip_18PlusPop_Pct in the data
+vaccine_latest %>%
+  filter(!is.na(Administered_Dose1_Recip_18PlusPop_Pct)) %>% 
+  summarize(min = min(Administered_Dose1_Recip_18PlusPop_Pct), mean = mean(Administered_Dose1_Recip_18PlusPop_Pct), max = max(Administered_Dose1_Recip_18PlusPop_Pct))
+
+## Combine the two vaccine data sets
+vaccine_use <- rbind(vaccine_4_4, vaccine_latest)
+
+## Pivot wider the vaccine data
+vaccine_use_wide <- vaccine_use %>%
+  pivot_wider(names_from = Date, 
+              values_from = c(Completeness_pct, Administered_Dose1_Recip, Administered_Dose1_Pop_Pct, Administered_Dose1_Recip_18Plus, Administered_Dose1_Recip_18PlusPop_Pct),
+              names_sep = "_")
+
+## Combine observations with the same FIPS code
+
+vaccine_use_w <- vaccine_use_wide %>%
+  group_by(FIPS) %>%
+  summarize(
+    across(where(is.character), first),
+    across(where(is.numeric), sum, na.rm = TRUE))
+
+
+# Question 3
+## Merge the two data sets using left join
+cer_c$FIPS <- ifelse(nchar(cer_c$FIPS) < 5, paste0("0",cer_c$FIPS),cer_c$FIPS) 
+vaccine_use_w$FIPS <- ifelse(nchar(vaccine_use_w$FIPS) < 5, paste0("0",vaccine_use_wide$FIPS),vaccine_use_w$FIPS)
+
+cer_vaccine <- left_join(vaccine_use_w, cer_c, by = "FIPS")
+
+# Question 4
+## Calculate the correlation between the vote share of Joe Biden and the vaccine uptake
+
+cor(cer_vaccine$Biden_Pct, cer_vaccine$`Administered_Dose1_Recip_18PlusPop_Pct_2021-04-04`, use = "complete.obs")
+cor(cer_vaccine$Biden_Pct, cer_vaccine$`Administered_Dose1_Recip_18PlusPop_Pct_2023-05-10`, use = "complete.obs")
+
+## Create a new binary variable for Rhode Island
+cer_vaccine <- cer_vaccine %>%
+  mutate(Rhode_Island = ifelse(Recip_State == "RI", 1, 0))
+
+## Make Biden_Pct whole numbers
+cer_vaccine$Biden_Pct <- cer_vaccine$Biden_Pct * 100
+```
+
+```{r Politics and Covid Vaccine Uptake 5.1, fig.width=10, fig.height=6, fig.align='center'}
+# Question 5
+## Make a scatter plot of the relationship between the vote share of Joe Biden and the vaccine uptake
+
+### Scatter plot for 4/4/2021
+ggplot(cer_vaccine) +
+  geom_point(aes(x = Biden_Pct, y = `Administered_Dose1_Recip_18PlusPop_Pct_2021-04-04`,
+                 color = Biden_Pct, size = Rhode_Island, alpha = Rhode_Island, shape = factor(Rhode_Island))) +
+  geom_smooth(aes(x = Biden_Pct, y = `Administered_Dose1_Recip_18PlusPop_Pct_2021-04-04`), method = "loess", se = FALSE, color = "purple", size = 3) +
+  annotate("text", x = 10, y = 80, label = "Correlation: 0.251", size = 8, hjust = 0) +
+  scale_x_continuous(limits = c(min(cer_vaccine$Biden_Pct), max(cer_vaccine$Biden_Pct)), labels = function(x) paste0(x, "%"), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 100), labels = function(x) paste0(x, "%")) +
+  scale_color_gradientn(colors = c("red", "grey", "blue")) +
+  scale_size_continuous(range = c(1, 8)) +
+  scale_alpha_continuous(range = c(0.5, 1)) +
+  scale_shape_manual(values = c(16, 18)) +
+  labs(title = "Rhode Island reports abnormaly low vaccine uptake for a blue state",
+       subtitle = "Points represent individual counties; Vaccine Uptake as of April 4th, 2021",
+       x = "Vote Share of Joe Biden",
+       y = "Adult Vaccine Uptake") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 20, face = "bold", hjust = 0),
+        plot.subtitle = element_text(size = 15, hjust = 0),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+```
+
+```{r Politics and Covid Vaccine Uptake 5.2, fig.width=10, fig.height=6, fig.align='center'}
+### Scatter plot for 5/10/2023
+ggplot(cer_vaccine) +
+  geom_point(aes(x = Biden_Pct, y = `Administered_Dose1_Recip_18PlusPop_Pct_2023-05-10`,
+                 color = Biden_Pct, size = Rhode_Island, alpha = Rhode_Island, shape = factor(Rhode_Island))) +
+  geom_smooth(aes(x = Biden_Pct, y = `Administered_Dose1_Recip_18PlusPop_Pct_2023-05-10`), method = "loess", se = FALSE, color = "purple", size = 3) +
+  annotate("text", x = 50, y = 25, label = "Correlation: 0.408", size = 8, hjust = 0) +
+  scale_x_continuous(limits = c(min(cer_vaccine$Biden_Pct), max(cer_vaccine$Biden_Pct)), labels = function(x) paste0(x, "%"), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 100), labels = function(x) paste0(x, "%")) +
+  scale_color_gradientn(colors = c("red", "grey", "blue")) +
+  scale_size_continuous(range = c(1.5, 8)) +
+  scale_alpha_continuous(range = c(0.5, 1)) +
+  scale_shape_manual(values = c(16, 18)) +
+  labs(title = "Just over 2 years later, Rhode Island's vaccine uptake is nearly 100%",
+       subtitle = "Points represent individual counties; Vaccine Uptake as of May 10th, 2023",
+       x = "Vote Share of Joe Biden",
+       y = "Adult Vaccine Uptake") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 20, face = "bold", hjust = 0),
+        plot.subtitle = element_text(size = 15, hjust = 0),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+```
+
+# Section 3: Visualizing Models
+```{r Visualizing Models 1, fig.align='center'}
+# Load the data
+wdi <- read_csv("~/Desktop/POLI 301/Problem Set 6/wdi.csv")
+
+# Question 1
+## Create logged variables for GDP per capita and Child Mortality
+wdi <- wdi %>%
+  mutate(GDP_log = log(NY.GDP.PCAP.PP.KD),
+         Child_log = log(SH.DYN.MORT))
+
+## Create 4 regression models
+### Child Mortatility DV and GDP per capita IV
+model1 <- lm(Child_log ~ GDP_log, data = wdi)
+model2 <- lm(Child_log ~ NY.GDP.PCAP.PP.KD, data = wdi)
+model3 <- lm(SH.DYN.MORT ~ GDP_log, data = wdi)
+model4 <- lm(SH.DYN.MORT ~ NY.GDP.PCAP.PP.KD, data = wdi)
+
+summary(model1)
+summary(model2)
+summary(model3)
+summary(model4)
+```
+
+### Question 1:
+Model 1, in which the log of both GDP per capita and Child Mortality are used as the dependent and independent variables, respectively, is the most appropriate model. This is because the log transformation of both variables allows for a linear relationship between the two, as evidenced by the scatter plot below. The other models, which use the raw values of GDP per capita and Child Mortality, do not show a linear relationship between the two variables. This model also has the highest adjusted R-squared value, indicating that it explains the most variance in the data.
+
+
+
+```{r Visualizing Models 2, fig.width=10, fig.height=8, fig.align='center'}
+# Question 2
+## Remove observations for which region is "Aggregates"
+wdi <- wdi %>%
+  filter(region != "Aggregates")
+
+## Make a scatter plot of the relationship between GDP per capita and Child Mortality
+ggplot(wdi) +
+  geom_point(aes(x = GDP_log, y = Child_log, size = SP.POP.TOTL, color = region), alpha = 1) +
+  geom_smooth(aes(x = GDP_log, y = Child_log), method = "lm", se = FALSE, color = "grey", linewidth = 2, linetype = "dashed") +
+  geom_text_repel(data = wdi %>% filter(country %in% c("United States", "China", "India")),
+    aes(x = GDP_log, y = Child_log, label = country), size = 7, box.padding = 2, force = 3, max.iter = 1000) +
+  guides(size = "none",
+         color = guide_legend(override.aes = list(size = 5))) +
+  scale_color_manual(values = c("East Asia & Pacific" = "#D64E11", "Europe & Central Asia" = "#18A5D8", "Latin America & Caribbean" = "#A0D94A", "Middle East & North Africa" = "#F2D64B", "North America" = "#9B5FE0", "South Asia" = "#60DCE8", "Sub-Saharan Africa" = "#F29A2E")) +
+  scale_size_continuous(range = c(2, 10)) +
+  labs(title = "GDP per cpaita serves as an effective predictor of Child Mortality",
+       subtitle = "Child Mortality is also generally higher in Sub-Saharan Africa",
+       x = "GDP per Capita (Log)",
+       y = "Child Mortality (Log)",
+       color = "Region") +
+  theme_minimal() +
+  theme(legend.position = "top",
+        legend.justification = c(0, 0),
+        legend.title = element_text(size = 15, face = "bold"),
+        legend.text = element_text(size = 12),
+        plot.title = element_text(size = 20, face = "bold", hjust = 0),
+        plot.subtitle = element_text(size = 15, hjust = 0),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15))
+```
+
+
+```{r Visualizing Models 3, fig.width=10, fig.height=6, fig.align='center'}
+# Question 3
+## Create a new variable for log population
+wdi <- wdi %>%
+  mutate(Pop_log = log(SP.POP.TOTL))
+
+model_q3 <- felm(Child_log ~ GDP_log + Pop_log | region, data = wdi)
+summary(model_q3)
+
+model.graph <- tidy(model_q3, conf.int = TRUE)
+
+model.graph <- model.graph %>%
+  arrange(estimate)
+
+#Recode the estimates
+model.graph <- model.graph %>%
+  mutate(term = recode(term,
+    "GDP_log" = "GDP per Capita (Log)",
+    "Pop_log" = "Population (Log)"
+  ))
+
+ggplot(model.graph %>%  filter(term != "(Intercept)")) + 
+  geom_pointrange(aes(y = reorder(term, estimate), x = estimate, xmin = conf.low, xmax = conf.high, color = term), size = 1.5, linewidth = 1) +
+  geom_vline(xintercept = 0, color = "grey50", linetype = "dashed") +
+  scale_color_manual(values = c("GDP per Capita (Log)" = "#F52F40", "Population (Log)" = "#517559")) +
+  labs(title = "GDP per Capita is a better predictor of Child Mortality\nthan Population",
+       subtitle = "Fixed effects model with region fixed effects"
+       ) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 12),
+        plot.title = element_text(size = 20, face = "bold", hjust = 0),
+        plot.subtitle = element_text(size = 15, hjust = 0),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())
+```
+
+# Section 4: Conjoint Analysis
+```{r Conjoint Analysis 1, fig.align='center'}
+# Load the data
+conjoint <- read_csv("~/Desktop/POLI 301/Problem Set 6/conjoint_analysis.csv")
+
+# Question 1
+model_conjoint <- lm(pid7_conjoint ~ latino + black + female + gay + evangelic +
+                       catholic + union + wealth + #Demographics
+                       nascar + theater + npr + wsj +
+                       truck + prius + gun + #Social Behaviors
+                       support_taxes + support_abortion + support_wall + support_wage + 
+                       support_blm + support_metoo + support_gay + support_environment +
+                       support_background + support_obamacare, #Issues
+                     data = conjoint)
+
+tab_model(model_conjoint, show.ci = FALSE, collapse.se = TRUE, p.style = "stars",
+          dv.labels = "Perceived Partisanship",
+          pred.labels = c("(Intercept)",
+  # Demographics
+  "Latino",
+  "Black",
+  "Female",
+  "LGBTQ+",
+  "Evangelical",
+  "Catholic",
+  "Union Member",
+  "Wealthy",
+  # Social Behaviors
+  "Watches NASCAR",
+  "Enjoys Theater",
+  "Listens to NPR",
+  "Reads WSJ",
+  "Drives a Truck",
+  "Drives a Prius",
+  "Owns a Gun",
+  # Issues
+  "Support Higher Taxes",
+  "Support Abortion Rights",
+  "Support Border Wall",
+  "Support Higher Minimum Wage",
+  "Support BLM",
+  "Support MeToo Movement",
+  "Support Gay Rights",
+  "Support Environmental Policies",
+  "Support Background Checks",
+  "Support Obamacare"
+))
+```
+
+### Question 1:
+The variable that is the strongest predictor of a hypothetical candidate's partisanship in each variable category are as follows: 
+
+- **Demographics**: Being a member of the LGBTQ+ community has the largest coefficient, indicating that this variable has the most significant impact on perceived partisanship. Being an Evangelical has the smallest coefficient, suggesting that this variable has the least impact on perceived partisanship.
+
+- **Social Behaviors**: Owns a Gun has the largest coefficient, indicating that this variable has the most significant impact on perceived partisanship. Enjoying theater has the smallest coefficient, suggesting that this variable has the least impact on perceived partisanship.
+
+- **Issues**: Supporting the Gay Rights has the largest coefficient, indicating that this variable has the most significant impact on perceived partisanship to the left. However, Supporting the Border Wall also has a large coefficient but in the opposite direction, suggesting that this variable has a significant impact on perceived partisanship to the right. Supporting Background Checks has the smallest coefficient, indicating that this variable has the least impact on perceived partisanship.
+
+```{r Conjoint Analysis 2, fig.width=10, fig.height=6, fig.align='center'}
+# Question 2
+## Make a plot of the coefficients
+model.graph.conjoint <- tidy(model_conjoint, conf.int = TRUE)
+
+model.graph.conjoint <- model.graph.conjoint %>%
+  arrange(estimate)
+
+## Create a new "Type" variable to separate the different types of variables
+demographics <- c("latino", "black", "female", "gay", "evangelic", "catholic", "union", "wealth")
+
+social_behaviors <- c("nascar", "theater", "npr", "wsj", "truck", "prius", "gun")
+
+issues <- c("support_taxes", "support_abortion", "support_wall", "support_wage", "support_blm", "support_metoo", "support_gay", "support_environment", "support_background", "support_obamacare")
+
+model.graph.conjoint <- model.graph.conjoint %>%
+  mutate(Type = case_when(term %in% demographics ~ "Demographics",
+                          term %in% social_behaviors ~ "Social Behaviors",
+                          term %in% issues ~ "Issues"))
+
+## Reorder the levels of the type variable
+model.graph.conjoint$Type <- factor(model.graph.conjoint$Type, levels = c("Issues", "Demographics", "Social Behaviors"))
+
+## Data Cleaning
+model.graph.conjoint <- model.graph.conjoint %>% 
+  filter(term != "(Intercept)") %>%
+  group_by(Type) %>% 
+  arrange(Type, estimate) %>% 
+  mutate(term = factor(term, levels = unique(term))) %>% 
+  ungroup()
+
+model.graph.conjoint <- model.graph.conjoint %>%
+  mutate(term = recode(term,
+    "support_gay" = "Support Gay Rights",
+    "support_blm" = "Support BLM",
+    "support_taxes" = "Support Higher Taxes",
+    "support_obamacare" = "Support Obamacare",
+    "support_wage" = "Support Higher Minimum Wage",
+    "support_abortion" = "Support Abortion Rights",
+    "support_metoo" = "Support MeToo Movement",
+    "support_environment" = "Support Environmental Policies",
+    "support_background" = "Support Background Checks",
+    "support_wall" = "Support Border Wall",
+    "gay" = "LGBTQ+",
+    "union" = "Union Member",
+    "latino" = "Latino",
+    "black" = "Black",
+    "female" = "Female",
+    "catholic" = "Catholic",
+    "evangelic" = "Evangelical",
+    "wealth" = "Wealthy",
+    "prius" = "Drives a Prius",
+    "npr" = "Listens to NPR",
+    "theater" = "Enjoys Theater",
+    "wsj" = "Reads WSJ",
+    "truck" = "Drives a Truck",
+    "nascar" = "Watches NASCAR",
+    "gun" = "Owns a Gun"
+  ))
+
+## Plot the coefficients
+
+ggplot(model.graph.conjoint) +
+  geom_pointrange(aes(y = term, x = estimate, xmin = conf.low, xmax = conf.high, color = Type, shape = Type), size = 1, linewidth = 1) +
+  geom_vline(xintercept = 0, color = "grey50", linetype = "dashed") +
+  geom_label(aes(x = -1.45, y = 24, label = "More Liberal"), size = 6, hjust = 0) +
+  geom_label(aes(x = 0.25, y = 4, label = "More Conservative"), size = 6, hjust = 0) +
+  labs(title = "Political Issues are the best predictors of perceived partisanship",
+       subtitle = "2021 study on how <span style='color:#d7c5ed;'><b>political issues</b></span>, <span style='color:#ffbdb9;'><b>demographics</b></span>, and <span style='color:#aed3e1;'><b>social behaviors<br></b></span> influence perceptions of partisanship") +
+  scale_color_manual(values = c("Issues" = "#d7c5ed", "Demographics" = "#ffbdb9", "Social Behaviors" = "#aed3e1")) +
+  scale_x_continuous(limits = c(-1.5, 1.5)) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        plot.title = element_text(size = 15, face = "bold", hjust = 0),
+        plot.subtitle = ggtext::element_markdown(hjust = 0),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())
+```
+
+### Question 2:
+The results of the conjoint analysis show that political issues are the best predictors of perceived partisanship. The coefficients for the political issues variables are the largest in magnitude and have the most significant impact on perceived partisanship. This suggests that individuals are more likely to associate someone with a particular political party based on their stance on political issues rather than their demographics or social behaviors. Some of the social behaviors variables, such as "Watches NASCAR" and "Drives a Truck," also have a significant impact on perceived partisanship, but to a lesser extent than the political issues variables. Demographics variables, such as "Latino" and "Black," have a smaller impact on perceived partisanship compared to the other variables, while being a member of the LGBTQ+ community has a slightly larger impact. Overall, the results indicate that political issues play a more significant role in shaping perceptions of partisanship than demographics or social behaviors.
+
+```{r Conjoint Analysis 3, fig.width=10, fig.height=6, fig.align='center'}
+# Question 3
+model_below <- lm(pid7_conjoint ~ latino + black + female + gay + evangelic +
+                       catholic + union + wealth + #Demographics
+                       nascar + theater + npr + wsj +
+                       truck + prius + gun + #Social Behaviors
+                       support_taxes + support_abortion + support_wall + support_wage + 
+                       support_blm + support_metoo + support_gay + support_environment +
+                       support_background + support_obamacare, #Issues
+                     data = conjoint %>% filter(knowledge < median(knowledge)))
+
+model_above <- lm(pid7_conjoint ~ latino + black + female + gay + evangelic +
+                       catholic + union + wealth + #Demographics
+                       nascar + theater + npr + wsj +
+                       truck + prius + gun + #Social Behaviors
+                       support_taxes + support_abortion + support_wall + support_wage + 
+                       support_blm + support_metoo + support_gay + support_environment +
+                       support_background + support_obamacare, #Issues
+                     data = conjoint %>% filter(knowledge > median(knowledge)))
+
+model.graph.below <- tidy(model_below, conf.int = TRUE)
+model.graph.above <- tidy(model_above, conf.int = TRUE)
+
+#Make variable denoting which model the data comes from
+model.graph.below <- model.graph.below %>%
+  mutate(Knowledge = "Below Average Political Education")
+
+model.graph.above <- model.graph.above %>%
+  mutate(Knowledge = "Above Average Political Education")
+
+#Combine the two models using bind_rows
+model.graph.3 <- bind_rows(model.graph.below, model.graph.above)
+
+model.graph.3 <- model.graph.3 %>%
+  arrange(estimate)
+
+model.graph.3 <- model.graph.3 %>%
+  mutate(Type = case_when(term %in% demographics ~ "Demographics",
+                          term %in% social_behaviors ~ "Social Behaviors",
+                          term %in% issues ~ "Issues"))
+
+## Reorder the levels of the type variable
+model.graph.3$Type <- factor(model.graph.3$Type, levels = c("Issues", "Demographics", "Social Behaviors"))
+
+## Data Cleaning
+model.graph.3 <- model.graph.3 %>% 
+  filter(term != "(Intercept)") %>%
+  group_by(Type) %>% 
+  arrange(Type, estimate) %>%  # Sort within each Type by descending estimate
+  mutate(term = factor(term, levels = unique(term))) %>% 
+  ungroup()
+
+model.graph.3 <- model.graph.3 %>%
+    mutate(term = recode(term,
+    "support_gay" = "Support Gay Rights",
+    "support_blm" = "Support BLM",
+    "support_taxes" = "Support Higher Taxes",
+    "support_obamacare" = "Support Obamacare",
+    "support_wage" = "Support Higher Minimum Wage",
+    "support_abortion" = "Support Abortion Rights",
+    "support_metoo" = "Support MeToo Movement",
+    "support_environment" = "Support Environmental Policies",
+    "support_background" = "Support Background Checks",
+    "support_wall" = "Support Border Wall",
+    "gay" = "LGBTQ+",
+    "union" = "Union Member",
+    "latino" = "Latino",
+    "black" = "Black",
+    "female" = "Female",
+    "catholic" = "Catholic",
+    "evangelic" = "Evangelical",
+    "wealth" = "Wealthy",
+    "prius" = "Drives a Prius",
+    "npr" = "Listens to NPR",
+    "theater" = "Enjoys Theater",
+    "wsj" = "Reads WSJ",
+    "truck" = "Drives a Truck",
+    "nascar" = "Watches NASCAR",
+    "gun" = "Owns a Gun"
+  ))
+  
+## Plot the coefficients
+### Facet by knowledge level
+ggplot(model.graph.3) +
+  geom_pointrange(aes(y = term, x = estimate, xmin = conf.low, xmax = conf.high, color = Type, shape = Type), size = 1, linewidth = 1) +
+  geom_vline(xintercept = 0, color = "grey50", linetype = "dashed") +
+  geom_label(aes(x = -1.75, y = 24, label = "More Liberal"), hjust = 0) +
+  geom_label(aes(x = 0.25, y = 4, label = "More Conservative"), hjust = 0) +
+  labs(title = "Political Issues are the best predictors of perceived partisanship",
+       subtitle = "2021 study on how <span style='color:#d7c5ed;'><b>political issues</b></span>, <span style='color:#ffbdb9;'><b>demographics</b></span>, and <span style='color:#aed3e1;'><b>social behaviors<br></b></span> influence perceptions of partisanship") +
+  scale_color_manual(values = c("Issues" = "#d7c5ed", "Demographics" = "#ffbdb9", "Social Behaviors" = "#aed3e1")) +
+  scale_x_continuous(limits = c(-2, 2)) +
+  facet_wrap(~Knowledge) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        plot.title = element_text(size = 15, face = "bold", hjust = 0),
+        plot.subtitle = ggtext::element_markdown(hjust = 0),
+        strip.text = element_text(size = 10, face = "bold", hjust = 0),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())
+```
+
+### Question 3:
+The results of this conjoint analysis are consistent with our hypothesis that those who were more politcally educated are better at sorting a hypothetical candidate into a political party. The coefficients for the political issues variables are larger in magnitude for those with above average political education compared to those with below average political education. This suggests that individuals with above average political education are more likely to associate someone with a particular political party based on their stance on political issues. The demographic variables have a smaller impact on perceived partisanship for both groups, while the social behaviors variables have the least impact. Overall, the results indicate that political issues play a more significant role in shaping perceptions of partisanship than demographics or social behaviors, and that this effect is more pronounced among those with above average political education.
+
+
+# Section 5: Your Figure
+```{r Sec 5, fig.width=10, fig.height=6, fig.align='center'}
+setwd("~/Desktop/POLI 300/Problem Set 8")
+#Loading the data#
+load("Names.RData")
+
+#Regresssion Model#
+reg_5 <- lm(call_back ~ black*female + honors + empholes + specialskills + 
+               req + chicago + ofjobs + yearsexp + 
+               retailsales + chicago, data = names)
+
+tab_model(reg_5, show.ci = FALSE, show.se = TRUE, collapse.se = TRUE, p.style = "stars", 
+          title = "Regression Model of Call Backs with an Interaction between Black and Female with Control Variables",
+          dv.labels = "Call Backs",
+          pred.labels = c("Intercept", "Black", "Female", "Honors Mentioned on Resume", "Employment Holes", "Special Skills Mentioned", "Ad Mentions Job Requirement", "Chicago", "No. of Jobs on Resume", "Years of Work Experience", "Retail Sales", "Black * Female"))
+```
+
+```{r Sec 5.2, fig.width=10, fig.height=6, fig.align='center'}
+# Make a plot of the coefficients
+model.graph.5 <- tidy(reg_5, conf.int = TRUE)
+
+model.graph.5 <- model.graph.5 %>%
+  arrange(estimate)
+
+# Create new "Type" variable to separate the different types of variables
+control_vars <- c("honors", "empholes", "specialskills", "req", "chicago", "ofjobs", "yearsexp", "retailsales", "chicago")
+
+int_vars <- c("black", "female", "black:female")
+
+model.graph.5 <- model.graph.5 %>%
+  mutate(Type = case_when(term %in% control_vars ~ "Control Variables",
+                          term %in% int_vars ~ "Interaction"))
+
+## Reorder the levels of the type variable
+model.graph.5$Type <- factor(model.graph.5$Type, levels = c("Interaction", "Control Variables"))
+
+## Data Cleaning
+model.graph.5 <- model.graph.5 %>% 
+  filter(term != "(Intercept)") %>%
+  group_by(Type) %>% 
+  arrange(Type, estimate) %>% 
+  mutate(term = factor(term, levels = unique(term))) %>% 
+  ungroup()
+
+model.graph.5 <- model.graph.5 %>%
+  mutate(term = recode(term,
+    "black" = "Black",
+    "female" = "Female",
+    "black:female" = "Black x Female",
+    "honors" = "Honors Mentioned on Resume",
+    "empholes" = "Employment Holes",
+    "specialskills" = "Special Skills Mentioned",
+    "req" = "Ad Mentions Job Requirement",
+    "chicago" = "Chicago",
+    "ofjobs" = "No. of Jobs on Resume",
+    "yearsexp" = "Years of Work Experience",
+    "retailsales" = "Retail Sales Experience"
+  ))
+
+## Make a new binary variable that is only 1 for "Black"
+model.graph.5 <- model.graph.5 %>%
+  mutate(Blk = ifelse(term == "Black", 1, 0))
+
+
+## Plot the coefficients
+ggplot(model.graph.5) +
+  geom_pointrange(aes(y = term, x = estimate, xmin = conf.low, xmax = conf.high, color = Type, shape = Type, size = factor(Blk), linewidth = factor(Blk))) +
+  geom_vline(xintercept = 0, color = "grey50", linetype = "dashed") +
+  geom_text(aes(x = -0.04, y = 8.5, label = "Control Variables"), size = 4, hjust = 0, color = "#517559") +
+  geom_text(aes(x = 0.06, y = 2.5, label = "Interaction Terms"), size = 4, hjust = 0, color = "#F52F40") +
+  scale_color_manual(values = c("Interaction" = "#F52F40", "Control Variables" = "#517559")) +
+  scale_y_discrete(expand = c(0, 2)) +
+  scale_size_manual(values = c(1, 2)) +
+  scale_linewidth_manual(values = c(1, 2)) +
+  annotate("text", x = -0.06, y = 12, label = "Less Likely to be Called Back", size = 4, hjust = 0) +
+  annotate("text", x = 0.02, y = 12, label = "More Likely to be Called Back", size = 4, hjust = 0) +
+  labs(title = "Black Males are most likely to be discriminated against in the hiring process\ndue to the sound of their name",
+       subtitle = "Regression model of call backs with an interaction on black and female sounding names") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.text.x = element_text(size = 12),
+        plot.title = element_text(size = 15, face = "bold", hjust = 0),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())
+```
+
+This is a data set of the 10,000 “ghost” job applicants to determine if there exists any racial or sexual discrimination of job applicants based on their name. I created a statistical model accounting for outlying variables and used a comparison between black sounding names and female sounding name to see if discrimination was stronger among different combinations of black/non-black and male/female sounding names. . Based of the model, I was able to conclude that having a female sounding name or having a female and black sounding name had no statistically significant impact on the amount of call backs received. However, I also observed that having a black and male sounding name did lead to statistically significant decrease in call backs received. Those with a black and male sounding name suffered from a 0.05 decrease in probability of receiving a call back. This suggests that there is a significant amount of discrimination against black men based on the sound of their name. 
